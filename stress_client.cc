@@ -10,7 +10,7 @@
 // kitne clients ek saath
 #define NUM_CLIENTS 10000
 // har client kitni requests karega
-#define REQUESTS_PER_CLIENT 100
+#define REQUESTS_PER_CLIENT 1
 
 // shared counter — total requests done
 int total_requests = 0;

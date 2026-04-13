@@ -12,7 +12,27 @@ void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0); // purane flags lo
     fcntl(fd, F_SETFL, flags | O_NONBLOCK); // non-blocking add karo
 }
-
+// partial send fix
+// write() ek baar mein sab nahi bhejta
+// isliye loop mein bhejo jab tak sab na jaaye
+void write_all(int fd, const char* buf, int total) {
+    int sent = 0;
+    while(sent < total) {
+        int n = write(fd, buf + sent, total - sent);
+        // buf + sent = jo gaya skip karo
+        // total - sent = abhi kitna baaki hai
+        
+        if(n == -1 && errno == EAGAIN) {
+            // send buffer full — thoda wait
+            continue;
+        }
+        if(n <= 0) {
+            // client disconnect ho gaya
+            break;
+        }
+        sent += n; // track karo kitna gaya
+    }
+}
 int main() {
 
     // Step 1 — listening socket banao
@@ -116,19 +136,55 @@ int main() {
                     // naye client ko epoll mein add karo
                     // ab yeh bhi watch hoga
                     epoll_event cev{};
-                    cev.events  = EPOLLIN | EPOLLET;
+                    cev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
                     cev.data.fd = client;
                     epoll_ctl(epfd, EPOLL_CTL_ADD,
                              client, &cev);
+		    // disconnect detect karo pehle
+if(events[i].events & EPOLLRDHUP) {
+    printf("client disconnect fd=%d\n", fd);
+    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+    close(fd);
+    continue;
+}
 
                     printf("\n naya client aaya fd=%d\n", client);
                 }
 
-            } else {
+            } else if(events[i].events & EPOLLIN) {
+    while(true) {
+        char buf[1024]{};
+        int bytes = read(fd, buf, sizeof(buf)-1);
+
+        if(bytes == 0) {
+            // graceful disconnect
+            printf("client ne bye bola fd=%d\n", fd);
+            epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+            close(fd);
+            break;
+        }
+        if(bytes == -1) {
+            if(errno == EAGAIN) break;  // buffer khali
+            if(errno == ECONNRESET) {
+                // client crash
+                printf("client crash fd=%d\n", fd);
+                epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+                close(fd);
+            }
+            break;
+        }
+
+        printf("fd=%d: %s\n", fd, buf);
+        write_all(fd, buf, bytes);
+    }
+} 
+
+
+		/*{
                 // purana client ne data bheja
                 // ET mode mein read loop zaroori hai
                 // ek baar mein poora data padho
-                while(true) {
+               * while(true) {
                     char buf[1024]{};
                     int bytes = read(fd, buf,
                                     sizeof(buf)-1);
@@ -149,9 +205,10 @@ int main() {
 
                     // data aaya — wapas bhejo (echo)
                     printf("fd=%d ne bheja: %s\n", fd, buf);
-                    write(fd, buf, bytes);
+                    //write(fd, buf, bytes);
+		    write_all(fd,buf,bytes);
                 }
-            }
+            }*/
         }
     }
 
